@@ -194,19 +194,6 @@ struct Game3D : iGame
         }
         return double(aliveCount) / (double(field.k) * double(field.m) * double(field.n));
     }
-    void clearField()
-    {
-        for (int z = 0; z < field.k; ++z)
-        {
-            for (int x = 0; x < field.n; ++x)
-            {
-                for (int y = 0; y < field.m; ++y)
-                {
-                    field[z][x][y].type = TypeCell::env;
-                }
-            }
-        }
-    }
     void setGame(double p, int s = 0)
     {
         probability = p;
@@ -249,7 +236,7 @@ struct Game3D : iGame
     }
 };
 
-void experiment(Game3D& g3d, void(*fill)(Field3D&))
+void doExperiment(Game3D& g3d, const Field3D& baseField)
 {
     for (int r = 1; r <= 2; ++r)
     {
@@ -261,7 +248,7 @@ void experiment(Game3D& g3d, void(*fill)(Field3D&))
                 {
                     for (int op = be + 1; op <= 27; ++op)
                     {
-                        fill(g3d.field);
+                        g3d.field = baseField;
 
                         g3d.radius = r;
                         g3d.loneliness = ll;
@@ -276,8 +263,6 @@ void experiment(Game3D& g3d, void(*fill)(Field3D&))
                         {
                             std::cout << r << ' ' << ll << ' ' << bs << ' ' << be << ' ' << op << '\n';
                         }
-
-                        g3d.clearField();
                     }
                 }
             }
@@ -289,34 +274,31 @@ int main()
 {
     Game3D g3d(4, 4, 4);
 
-    auto fill_1 = [](Field3D& field)
-    {
-        field[1][0][1].type = TypeCell::alive;
-        field[1][2][3].type = TypeCell::alive;
-        field[2][0][1].type = TypeCell::alive;
-        field[2][2][2].type = TypeCell::alive;
-        field[3][2][2].type = TypeCell::alive;
-        field[3][3][1].type = TypeCell::alive;
-    };
+    Field3D baseField1(4, 4, 4);
+    baseField1[1][0][1].type = TypeCell::alive;
+    baseField1[1][2][3].type = TypeCell::alive;
+    baseField1[2][0][1].type = TypeCell::alive;
+    baseField1[2][2][2].type = TypeCell::alive;
+    baseField1[3][2][2].type = TypeCell::alive;
+    baseField1[3][3][1].type = TypeCell::alive;
 
-    auto fill_2 = [](Field3D& field)
+    Field3D baseField2(4, 4, 4);
+    for (int l = 0; l < 4; ++l)
     {
-        for (int l = 0; l < 4; ++l)
+        for (int i = 0; i < 4; ++i)
         {
-            for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
             {
-                for (int j = 0; j < 4; ++j)
-                {
-                    field[l][i][j].type = TypeCell::alive;
-                }
+                baseField2[l][i][j].type = TypeCell::alive;
             }
         }
-        field[2][1][0].type = TypeCell::env;
-        field[2][0][2].type = TypeCell::env;
-        field[3][2][1].type = TypeCell::env;
-    };
+    }
+    baseField2[2][1][0].type = TypeCell::env;
+    baseField2[2][0][2].type = TypeCell::env;
+    baseField2[3][2][1].type = TypeCell::env;
+    
 
-    experiment(g3d, fill_1); // fill_1 change to fill_2
+    doExperiment(g3d, baseField2); // baseField1 change to baseField2
 
     return 0;
 }
