@@ -1,11 +1,17 @@
 #include <vector>
-#include <Windows.h>
-#include <list>
+#include <string>
 #include <iostream>
 #include <algorithm>
 #include <numeric>
 #include <random>
+
+#include <Windows.h>
+#include <conio.h>
+
+#include "Observer.hpp"
+
 using namespace std;
+
 // 0 -------\ Y (m)
 //   -------/
 // ||
@@ -13,6 +19,22 @@ using namespace std;
 // ||
 // ||
 // \/ X (n)
+
+enum GameState
+{
+    SETUP,
+    READY,
+    RUN,
+    PAUSE,
+    OVER
+};
+
+enum GameEvent
+{
+    FULL_FIELD,
+    EMPTY_FIELD
+};
+
 enum TypeCell
 {
     env,
@@ -27,6 +49,11 @@ struct Cell
         else if (cell.type == alive) out << '#';
         return out;
     }
+};
+
+struct iField
+{
+    virtual void show() = 0;
 };
 struct Field1D
 {
@@ -50,7 +77,7 @@ struct Field1D
         return out;
     }
 };
-struct Field2D
+struct Field2D : iField
 {
     int n = 0;
     int m = 0;
@@ -72,8 +99,12 @@ struct Field2D
             out << field[i] << "\n";
         return out;
     }
+    virtual void show() override
+    {
+        std::cout << *this;
+    }
 };
-struct Field3D
+struct Field3D : iField
 {
     int n = 0;
     int m = 0;
@@ -99,8 +130,17 @@ struct Field3D
             out << i << ":\n" << field[i] << "\n";
         return out;
     }
+    virtual void show() override
+    {
+        std::cout << *this;
+    }
 };
 struct iGame
+{
+    virtual void runGame(int numIt) = 0;
+};
+
+struct GameSettings
 {
     int n = 0;
     int m = 0;
@@ -115,10 +155,9 @@ struct iGame
     int birth_start = 3; // с этого числа и до birth_end по€вл€етс€ жива€ клетка
     int birth_end = 3;
     int overpopulation = 5; // с этого числа и дальше клетки погибают от перенаселени€
-    virtual void runGame(int numIt) = 0;
 };
 
-struct Game2D : public iGame
+struct Game2D : iGame, GameSettings
 {
     Field2D field;
     Field2D fieldNext;
@@ -161,13 +200,8 @@ struct Game2D : public iGame
             field = fieldNext;
         }
     }
-    void startGame()
-    {
-
-    }
 };
-// реализовать Game3D
-struct Game3D : iGame
+struct Game3D : iGame, GameSettings, Subject<GameEvent>
 {
     Field3D field;
     Field3D fieldNext;
@@ -212,6 +246,10 @@ struct Game3D : iGame
     }
     void runGame(int numIt) override
     {
+        double frac = getAliveFraction();
+        double epsilon = 0.0001;
+        if (frac >= 0.0 - epsilon && frac <= 0.0 + epsilon) { sendEvent(EMPTY_FIELD); return; }
+        if (frac >= 1.0 - epsilon && frac <= 1.0 + epsilon) { sendEvent(FULL_FIELD); return; }
         for (int it = 0; it < numIt; it++)
         {
             for (int l = 0; l < k; l++)
@@ -229,10 +267,6 @@ struct Game3D : iGame
             }
             field = fieldNext;
         }
-    }
-    void startGame()
-    {
-
     }
 };
 
@@ -270,67 +304,144 @@ void doExperiment(Game3D& g3d, const Field3D& baseField)
     }
 };
 
-int main()
+struct View : Observer<GameEvent>
 {
-    Game3D g3d(4, 4, 4);
+    iGame* game = nullptr;
+    iField* field = nullptr;
+    GameState currentState = SETUP;
+    std::string overMessage = { 0 };
 
-    Field3D baseField1(4, 4, 4);
-    baseField1[1][0][1].type = TypeCell::alive;
-    baseField1[1][2][3].type = TypeCell::alive;
-    baseField1[2][0][1].type = TypeCell::alive;
-    baseField1[2][2][2].type = TypeCell::alive;
-    baseField1[3][2][2].type = TypeCell::alive;
-    baseField1[3][3][1].type = TypeCell::alive;
-
-    Field3D baseField2(4, 4, 4);
-    for (int l = 0; l < 4; ++l)
+    void start()
     {
-        for (int i = 0; i < 4; ++i)
+        bool isGameRun = true;
+        while (isGameRun)
         {
-            for (int j = 0; j < 4; ++j)
+            switch (currentState)
             {
-                baseField2[l][i][j].type = TypeCell::alive;
+            case SETUP:
+            {
+                system("cls");
+
+                overMessage.clear();
+                applyGameSettings(getGameSettings());
+
+                currentState = READY;
+                break;
+            }
+
+            case READY:
+                field->show();
+                Sleep(500);
+
+                currentState = RUN;
+                break;
+
+            case RUN:
+            {
+                system("cls");
+
+                game->runGame(1);
+                field->show();
+                Sleep(500);
+
+                int pressedKey = getPressedKey();
+                if (pressedKey == 'з' || pressedKey == 'p') currentState = PAUSE;
+                break;
+            }
+            case PAUSE:
+            {
+                std::cout << "Ќажмите R, чтобы вернутьс€ в SETUP, или любую клавишу, чтобы продолжить.\n";
+                int key = 0;
+                while((key = getPressedKey()) == -1);
+                if (key == 'r' || key == 'к') currentState = SETUP;
+                else currentState = RUN;
+                break;
+            }
+            case OVER:
+            {
+                char answer = 0;
+                //if 
+                std::cout << "GAME OVER (" << overMessage << ").\n";
+                do {
+                    std::cout << "Ќачать сначала? (y/n): ";
+                    std::cin >> answer;
+                    std::cout << '\n';
+                    if (answer == 'y') currentState = SETUP;
+                    if (answer == 'n') exit(0);
+                } while (currentState == OVER);
+                break;
+            }
+            default:
+                std::cout << "Ќеверное состо€ние игры.\n";
+                break;
             }
         }
     }
-    baseField2[2][1][0].type = TypeCell::env;
-    baseField2[2][0][2].type = TypeCell::env;
-    baseField2[3][2][1].type = TypeCell::env;
-    
 
-    doExperiment(g3d, baseField2); // baseField1 change to baseField2
+    int getPressedKey()
+    {
+        if (_kbhit()) return _getch();
+        return -1;
+    }
+
+    GameSettings getGameSettings()
+    {
+        GameSettings gs;
+        bool isOk = true;
+        do {
+            std::cout << "¬ведите размеры пол€ (n, m, k): ";
+            std::cin >> gs.n >> gs.m >> gs.k;
+            std::cout << "¬ведите плотность и сид (p, s): ";
+            std::cin >> gs.probability >> gs.seed;
+            if (gs.n == 0 || gs.m == 0 || gs.k == 0)
+            {
+                std::cout << "Ќеверные размеры пол€." << '\n';
+                system("pause");
+                isOk = false;
+            }
+            else if (gs.probability < 0 || gs.probability > 1)
+            {
+                std::cout << "Ќеверна€ плотность." << '\n';
+                system("pause");
+                isOk = false;
+            }
+            system("cls");
+        } while (!isOk);
+        return gs;
+    }
+
+    void applyGameSettings(GameSettings gs)
+    {
+        game = new Game3D(gs.n, gs.m, gs.k);
+        static_cast<Game3D*>(game)->setGame(gs.probability, gs.seed);
+        static_cast<Game3D*>(game)->addObserver(*this);
+        field = &(static_cast<Game3D*>(game)->field);
+    }
+
+    virtual void newEvent(GameEvent event) override
+    {
+        switch (event)
+        {
+        case FULL_FIELD:
+            overMessage = "FULL_FIELD";
+            currentState = OVER;
+            break;
+        case EMPTY_FIELD:
+            overMessage = "EMPTY_FIELD";
+            currentState = OVER;
+            break;
+        default:
+            break;
+        }
+    }
+};
+
+int main()
+{
+    setlocale(LC_ALL, "ru");
+
+    View view;
+    view.start();
 
     return 0;
 }
-
-// 0) Cell, Field, type Enum, operator <<
-// 1) view в данном варианте не нужен, достаточно иметь Field
-// 2) operator[] and "operator[][]" and operator(int i, int j, int k)
-// 3) iota, random
-// 4) view должен быть св€зан с game, чтобы получать от него "обновлени€" и взаимодействовать с ним
-// 4) например, мы хотим реализовать меню дл€ игры: паузу, донастройку, чтобы игра сообщала о некоторых событи€х.
-
-struct iView
-{
-    char livingCell; // символ "живой" клетки
-    char dyingCell; // символ "неживой" клетки
-    // ... свобода творчества дл€ реализации и взаимодействи€ view, можно реализовать 2d draw и использвать его в 3d
-};
-struct View2d : iView
-{
-    void draw(char** field, int n, int m)
-    {
-        system("cls");
-        for (int i = 0; i < n; i++)
-            fwrite(field[i], sizeof(char), m + 1, stdout);
-    }
-};
-struct View3d : iView
-{
-    char*** field;
-    void setField(char*** field) {};
-    void draw()
-    {
-
-    }
-};
