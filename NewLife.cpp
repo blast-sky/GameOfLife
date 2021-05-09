@@ -360,15 +360,14 @@ struct View : Observer<GameEvent>
             case OVER:
             {
                 char answer = 0;
-                //if 
                 std::cout << "GAME OVER (" << overMessage << ").\n";
                 do {
                     std::cout << "Начать сначала? (y/n): ";
                     std::cin >> answer;
                     std::cout << '\n';
                     if (answer == 'y') currentState = SETUP;
-                    if (answer == 'n') exit(0);
-                } while (currentState == OVER);
+                    if (answer == 'n') isGameRun = false;
+                } while (answer != 'y' && answer != 'n');
                 break;
             }
             default:
