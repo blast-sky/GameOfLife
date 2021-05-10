@@ -26,7 +26,8 @@ enum GameState
     READY,
     RUN,
     PAUSE,
-    OVER
+    OVER,
+    EXIT
 };
 
 enum GameEvent
@@ -135,11 +136,6 @@ struct Field3D : iField
         std::cout << *this;
     }
 };
-struct iGame
-{
-    virtual void runGame(int numIt) = 0;
-};
-
 struct GameSettings
 {
     int n = 0;
@@ -157,7 +153,15 @@ struct GameSettings
     int overpopulation = 5; // с этого числа и дальше клетки погибают от перенаселения
 };
 
-struct Game2D : iGame, GameSettings
+struct iGame : public GameSettings, Subject<GameEvent>
+{
+    virtual void setGame(double p, int s = 0) = 0;
+    virtual void runGame(int numIt) = 0;
+    virtual ~iGame() { ; }
+};
+
+
+struct Game2D : iGame
 {
     Field2D field;
     Field2D fieldNext;
@@ -168,11 +172,11 @@ struct Game2D : iGame, GameSettings
         dimension = 2;
         field = fieldNext = Field2D(n, m);
     }
-    void setGame(double p, int s = 0)
+    virtual void setGame(double p, int s = 0) override
     {
         probability = p;
         seed = s;
-        field = Field2D(n, m);
+        field = fieldNext = Field2D(n, m);
         vector<int> tmp(n * m);
         iota(tmp.begin(), tmp.end(), 0);
         shuffle(tmp.begin(), tmp.end(), std::mt19937(seed));
@@ -199,9 +203,19 @@ struct Game2D : iGame, GameSettings
             }
             field = fieldNext;
         }
+        int aliveCount = 0;
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < m; j++)
+            {
+                aliveCount += (field[i][j].type == TypeCell::alive);
+            }
+        }
+        if (aliveCount == 0) sendEvent(EMPTY_FIELD);
+        else if (aliveCount == n * m) sendEvent(FULL_FIELD);
     }
 };
-struct Game3D : iGame, GameSettings, Subject<GameEvent>
+struct Game3D : public iGame
 {
     Field3D field;
     Field3D fieldNext;
@@ -213,26 +227,11 @@ struct Game3D : iGame, GameSettings, Subject<GameEvent>
         dimension = 3;
         field = fieldNext = Field3D(n, m, k);
     }
-    double getAliveFraction()
-    {
-        int aliveCount = 0;
-        for (int z = 0; z < field.k; ++z)
-        {
-            for (int x = 0; x < field.n; ++x)
-            {
-                for (int y = 0; y < field.m; ++y)
-                {
-                    aliveCount += (field[z][x][y].type == TypeCell::alive);
-                }
-            }
-        }
-        return double(aliveCount) / (double(field.k) * double(field.m) * double(field.n));
-    }
-    void setGame(double p, int s = 0)
+    virtual void setGame(double p, int s = 0) override
     {
         probability = p;
         seed = s;
-        field = Field3D(n, m, k);
+        field = fieldNext = Field3D(n, m, k);
         vector<int> tmp(n * m * k);
         iota(tmp.begin(), tmp.end(), 0);
         shuffle(tmp.begin(), tmp.end(), std::mt19937(seed));
@@ -246,10 +245,6 @@ struct Game3D : iGame, GameSettings, Subject<GameEvent>
     }
     void runGame(int numIt) override
     {
-        double frac = getAliveFraction();
-        double epsilon = 0.0001;
-        if (frac >= 0.0 - epsilon && frac <= 0.0 + epsilon) { sendEvent(EMPTY_FIELD); return; }
-        if (frac >= 1.0 - epsilon && frac <= 1.0 + epsilon) { sendEvent(FULL_FIELD); return; }
         for (int it = 0; it < numIt; it++)
         {
             for (int l = 0; l < k; l++)
@@ -267,6 +262,25 @@ struct Game3D : iGame, GameSettings, Subject<GameEvent>
             }
             field = fieldNext;
         }
+        double frac = getAliveFraction();
+        double epsilon = 0.0001;
+        if (frac >= 0.0 - epsilon && frac <= 0.0 + epsilon) { sendEvent(EMPTY_FIELD); return; }
+        if (frac >= 1.0 - epsilon && frac <= 1.0 + epsilon) { sendEvent(FULL_FIELD);  return; }
+    }
+    double getAliveFraction()
+    {
+        int aliveCount = 0;
+        for (int z = 0; z < field.k; ++z)
+        {
+            for (int x = 0; x < field.n; ++x)
+            {
+                for (int y = 0; y < field.m; ++y)
+                {
+                    aliveCount += (field[z][x][y].type == TypeCell::alive);
+                }
+            }
+        }
+        return double(aliveCount) / (double(field.k) * double(field.m) * double(field.n));
     }
 };
 
@@ -289,7 +303,7 @@ void doExperiment(Game3D& g3d, const Field3D& baseField)
                         g3d.birth_start = bs;
                         g3d.birth_end = be;
                         g3d.overpopulation = op;
-
+                        
                         g3d.runGame(20);
 
                         double frac = g3d.getAliveFraction();
@@ -306,10 +320,18 @@ void doExperiment(Game3D& g3d, const Field3D& baseField)
 
 struct View : Observer<GameEvent>
 {
+private:
     iGame* game = nullptr;
     iField* field = nullptr;
     GameState currentState = SETUP;
     std::string overMessage = { 0 };
+
+public:
+    View() = default;
+    ~View()
+    {
+        delete game;
+    }
 
     void start()
     {
@@ -319,62 +341,82 @@ struct View : Observer<GameEvent>
             switch (currentState)
             {
             case SETUP:
-            {
-                system("cls");
-
-                overMessage.clear();
-                applyGameSettings(getGameSettings());
-
+                onSetup();
                 currentState = READY;
                 break;
-            }
 
             case READY:
                 field->show();
                 Sleep(500);
-
                 currentState = RUN;
                 break;
 
             case RUN:
-            {
-                system("cls");
-
-                game->runGame(1);
-                field->show();
-                Sleep(500);
-
-                int pressedKey = getPressedKey();
-                if (pressedKey == 'з' || pressedKey == 'p') currentState = PAUSE;
+                onRun();
                 break;
-            }
+
             case PAUSE:
-            {
-                std::cout << "Нажмите R, чтобы вернуться в SETUP, или любую клавишу, чтобы продолжить.\n";
-                int key = 0;
-                while((key = getPressedKey()) == -1);
-                if (key == 'r' || key == 'к') currentState = SETUP;
-                else currentState = RUN;
+                onPause();
                 break;
-            }
+
             case OVER:
-            {
-                char answer = 0;
-                std::cout << "GAME OVER (" << overMessage << ").\n";
-                do {
-                    std::cout << "Начать сначала? (y/n): ";
-                    std::cin >> answer;
-                    std::cout << '\n';
-                    if (answer == 'y') currentState = SETUP;
-                    if (answer == 'n') isGameRun = false;
-                } while (answer != 'y' && answer != 'n');
+                onOver();
                 break;
-            }
+
+            case EXIT:
+                isGameRun = false;
+                break;
+
             default:
                 std::cout << "Неверное состояние игры.\n";
                 break;
             }
         }
+    }
+
+private:
+    void onSetup()
+    {
+        system("cls");
+
+        overMessage.clear();
+        GameSettings settings;
+        settings = getUserGameSettings();
+        applyGameSettings(settings);
+    }
+
+    void onRun()
+    {
+        system("cls");
+
+        game->runGame(1);
+        field->show();
+        Sleep(500);
+
+        int pressedKey = getPressedKey();
+        if (pressedKey == 'з' || pressedKey == 'p') currentState = PAUSE;
+    }
+
+    void onPause()
+    {
+        std::cout << "Нажмите R, чтобы вернуться в SETUP, или любую клавишу, чтобы продолжить.\n";
+        int key = 0;
+        while ((key = getPressedKey()) == -1);
+        if (key == 'r' || key == 'к') currentState = SETUP;
+        else currentState = RUN;
+    }
+
+    void onOver()
+    {
+        char answer = 0;
+        std::cout << "GAME OVER (" << overMessage << ").\n";
+        do {
+            std::cout << "Начать сначала? (y/n): ";
+            std::cin >> answer;
+            std::cout << '\n';
+            if (answer == 'y') currentState = SETUP;
+            if (answer == 'n') currentState = EXIT;
+        } while (answer != 'y' && answer != 'n');
     }
 
     int getPressedKey()
@@ -383,27 +425,40 @@ struct View : Observer<GameEvent>
         return -1;
     }
 
-    GameSettings getGameSettings()
+    GameSettings getUserGameSettings()
     {
         GameSettings gs;
-        bool isOk = true;
+        bool isOk;
         do {
-            std::cout << "Введите размеры поля (n, m, k): ";
+            if (std::cin.fail())
+            {
+                cin.clear(); // на случай, если предыдущий ввод завершился с ошибкой
+                cin.ignore(1000, '\n');
+            }
+            isOk = true;
+            std::cout << "Введите размерность поля (dimenshion): ";
+            std::cin >> gs.dimension;
+            std::cout << "Введите размеры поля (n, m, k), если dimenshion = 2, то k - любое: ";
             std::cin >> gs.n >> gs.m >> gs.k;
             std::cout << "Введите плотность и сид (p, s): ";
             std::cin >> gs.probability >> gs.seed;
-            if (gs.n == 0 || gs.m == 0 || gs.k == 0)
+
+            if (gs.dimension != 2 && gs.dimension != 3)
+            {
+                std::cout << "Неверная размерность поля." << '\n';
+                isOk = false;
+            }
+            else if (gs.n == 0 || gs.m == 0 || (gs.k == 0 && gs.dimension == 3))
             {
                 std::cout << "Неверные размеры поля." << '\n';
-                system("pause");
                 isOk = false;
             }
             else if (gs.probability < 0 || gs.probability > 1)
             {
                 std::cout << "Неверная плотность." << '\n';
-                system("pause");
                 isOk = false;
             }
+            if (!isOk) system("pause");;
             system("cls");
         } while (!isOk);
         return gs;
@@ -411,10 +466,21 @@ struct View : Observer<GameEvent>
 
     void applyGameSettings(GameSettings gs)
     {
-        game = new Game3D(gs.n, gs.m, gs.k);
-        static_cast<Game3D*>(game)->setGame(gs.probability, gs.seed);
-        static_cast<Game3D*>(game)->addObserver(*this);
-        field = &(static_cast<Game3D*>(game)->field);
+        if (gs.dimension == 2)
+        {
+            Game2D* pGame = new Game2D();
+            field = &(pGame->field);
+            game = pGame;
+        }
+        else if (gs.dimension == 3)
+        {
+            Game3D* pGame = new Game3D();
+            field = &(pGame->field);
+            game = pGame;
+        }
+        *static_cast<GameSettings*>(game) = gs; // set user settings
+        game->setGame(gs.probability, gs.seed);
+        game->addObserver(*this);
     }
 
     virtual void newEvent(GameEvent event) override
