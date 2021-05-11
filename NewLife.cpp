@@ -1,12 +1,16 @@
+#include <iostream>
+#include <fstream>
+#include <algorithm>
+
 #include <vector>
 #include <string>
-#include <iostream>
-#include <algorithm>
+
 #include <numeric>
 #include <random>
 
 #include <Windows.h>
 #include <conio.h>
+#include <stdlib.h>
 
 #include "Observer.hpp"
 
@@ -29,7 +33,6 @@ enum GameState
     OVER,
     EXIT
 };
-
 enum GameEvent
 {
     FULL_FIELD,
@@ -41,6 +44,16 @@ enum TypeCell
     env,
     alive
 };
+
+const std::string gameSettingsNames[] = {
+    "dimenshion",
+    "n",
+    "m",
+    "k",
+    "seed",
+    "probability"
+};
+
 struct Cell
 {
     TypeCell type;
@@ -153,13 +166,67 @@ struct GameSettings
     int overpopulation = 5; // с этого числа и дальше клетки погибают от перенаселения
 };
 
+class GameLoader
+{
+public:
+    GameLoader() = delete;
+    GameLoader(const GameLoader&) = delete;
+
+    static void loadGameSettingsFromFile(const std::string path, GameSettings& settings)
+    {
+        std::ifstream input(path, std::ios_base::in);
+        if (!input.is_open()) throw(std::string("Файл не смог открыться"));
+
+        std::string currentLine;
+        while (getline(input, currentLine, '\n'))
+        {
+            auto itRemove = std::remove(currentLine.begin(), currentLine.end(), ' ');
+            currentLine.erase(itRemove, currentLine.end());
+            std::transform(currentLine.begin(), currentLine.end(), currentLine.begin(), tolower);
+
+            size_t it = currentLine.find('=');
+            std::string paramName(&currentLine[0], it);
+            std::string paramValue(&currentLine[0] + it + 1, currentLine.size() - it - 1);
+
+            setParamValue(paramName, atof(paramValue.c_str()), settings);
+        }
+        input.close();
+    }
+    static void loadGameSettingsToFile(const std::string path, const GameSettings& gs)
+    {
+        std::ofstream output(path, std::ios_base::out | std::ios_base::trunc);
+        if (!output.is_open()) throw(std::string("Файл не смог открыться"));
+
+        output << gameSettingsNames[0] + '=' << gs.dimension << '\n';
+        output << gameSettingsNames[1] + '=' << gs.n << '\n';
+        output << gameSettingsNames[2] + '=' << gs.m << '\n';
+        output << gameSettingsNames[3] + '=' << gs.k << '\n';
+        output << gameSettingsNames[4] + '=' << gs.seed << '\n';
+        std::string prob = std::to_string(gs.probability);
+        std::replace(prob.begin(), prob.end(), '.', ',');
+        output << gameSettingsNames[5] + '=' << prob << '\n';
+
+        output.close();
+    }
+
+private:
+    static void setParamValue(std::string param, double value, GameSettings& gs)
+    {
+        if (param == gameSettingsNames[0]) gs.dimension = (int)value;
+        else if (param == gameSettingsNames[1]) gs.n = (int)value;
+        else if (param == gameSettingsNames[2]) gs.m = (int)value;
+        else if (param == gameSettingsNames[3]) gs.k = (int)value;
+        else if (param == gameSettingsNames[4]) gs.seed = (int)value;
+        else if (param == gameSettingsNames[5]) gs.probability = value;
+    }
+};
+
 struct iGame : public GameSettings, Subject<GameEvent>
 {
     virtual void setGame(double p, int s = 0) = 0;
     virtual void runGame(int numIt) = 0;
     virtual ~iGame() { ; }
 };
-
 
 struct Game2D : iGame
 {
@@ -378,10 +445,19 @@ private:
     void onSetup()
     {
         system("cls");
-
         overMessage.clear();
+
         GameSettings settings;
-        settings = getUserGameSettings();
+        char answer;
+        do {
+            std::cout << "Начать новую игру или загрузить? (n - new game, l - load game): ";
+            std::cin >> answer;
+        } while (answer != 'l' && answer != 'n');
+
+        if (answer == 'n')
+            getUserGameSettings(settings);
+        else
+            loadGameSettings(settings);
         applyGameSettings(settings);
     }
 
@@ -399,10 +475,14 @@ private:
 
     void onPause()
     {
-        std::cout << "Нажмите R, чтобы вернуться в SETUP, или любую клавишу, чтобы продолжить.\n";
+        std::cout << "Нажмите:\n"
+            "R, чтобы вернуться в SETUP,\n"
+            "S, чтобы сохранить игру\n"
+            "или любую другую клавишу, чтобы продолжить.\n";
         int key = 0;
         while ((key = getPressedKey()) == -1);
         if (key == 'r' || key == 'к') currentState = SETUP;
+        else if (key == 's' || key == 'ы') { saveGameSettings(); currentState = RUN; }
         else currentState = RUN;
     }
 
@@ -410,6 +490,12 @@ private:
     {
         char answer = 0;
         std::cout << "GAME OVER (" << overMessage << ").\n";
+        do {
+            std::cout << "Сохранить настройки игры? (y/n): ";
+            std::cin >> answer;
+            std::cout << '\n';
+            if (answer == 'y') saveGameSettings();
+        } while (answer != 'y' && answer != 'n');
         do {
             std::cout << "Начать сначала? (y/n): ";
             std::cin >> answer;
@@ -425,9 +511,8 @@ private:
         return -1;
     }
 
-    GameSettings getUserGameSettings()
+    void getUserGameSettings(GameSettings& gs)
     {
-        GameSettings gs;
         bool isOk;
         do {
             if (std::cin.fail())
@@ -461,11 +546,11 @@ private:
             if (!isOk) system("pause");;
             system("cls");
         } while (!isOk);
-        return gs;
     }
 
     void applyGameSettings(GameSettings gs)
     {
+        if (gs.dimension != 2 && gs.dimension != 3) throw(std::string("лол, неверные настройки."));
         if (gs.dimension == 2)
         {
             Game2D* pGame = new Game2D();
@@ -481,6 +566,36 @@ private:
         *static_cast<GameSettings*>(game) = gs; // set user settings
         game->setGame(gs.probability, gs.seed);
         game->addObserver(*this);
+    }
+
+    void saveGameSettings()
+    {
+        std::string path;
+        std::cout << "Введите название файла: ";
+        std::cin >> path;
+        GameSettings& settings = *static_cast<GameSettings*>(game);
+        GameLoader::loadGameSettingsToFile(path, settings);
+    }
+
+    void loadGameSettings(GameSettings& settings)
+    {
+        bool isOk;
+        std::string path;
+        do {
+            std::cout << "Введите название файла: ";
+            std::cin >> path;
+
+            isOk = true;
+            try
+            {
+                GameLoader::loadGameSettingsFromFile(path, settings);
+            }
+            catch (const std::string& e)
+            {
+                std::cout << e << '\n';
+                isOk = false;
+            }
+        } while (!isOk);
     }
 
     virtual void newEvent(GameEvent event) override
