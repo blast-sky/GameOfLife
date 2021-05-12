@@ -39,12 +39,6 @@ enum GameEvent
     EMPTY_FIELD
 };
 
-enum TypeCell
-{
-    env,
-    alive
-};
-
 const std::string gameSettingsNames[] = {
     "dimenshion",
     "n",
@@ -52,6 +46,12 @@ const std::string gameSettingsNames[] = {
     "k",
     "seed",
     "probability"
+};
+
+enum TypeCell
+{
+    env,
+    alive
 };
 
 struct Cell
@@ -195,7 +195,7 @@ public:
     static void loadGameSettingsToFile(const std::string path, const GameSettings& gs)
     {
         std::ofstream output(path, std::ios_base::out | std::ios_base::trunc);
-        if (!output.is_open()) throw(std::string("Файл не смог открыться"));
+        if (!output.is_open()) throw(std::string("Файл не смог открыться."));
 
         output << gameSettingsNames[0] + '=' << gs.dimension << '\n';
         output << gameSettingsNames[1] + '=' << gs.n << '\n';
@@ -470,7 +470,7 @@ private:
         Sleep(500);
 
         int pressedKey = getPressedKey();
-        if (pressedKey == 'з' || pressedKey == 'p') currentState = PAUSE;
+        if (pressedKey == 167 || pressedKey == 'p') currentState = PAUSE; // 167 - 'з'
     }
 
     void onPause()
@@ -481,8 +481,9 @@ private:
             "или любую другую клавишу, чтобы продолжить.\n";
         int key = 0;
         while ((key = getPressedKey()) == -1);
-        if (key == 'r' || key == 'к') currentState = SETUP;
-        else if (key == 's' || key == 'ы') { saveGameSettings(); currentState = RUN; }
+        std::cout << key;
+        if (key == 'r' || key == 170) currentState = SETUP; // 170 - 'к'
+        else if (key == 's' || key == 235) { saveGameSettings(); currentState = RUN; } // 235 - 'Ы'
         else currentState = RUN;
     }
 
