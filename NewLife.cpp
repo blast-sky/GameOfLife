@@ -392,6 +392,7 @@ private:
     iField* field = nullptr;
     GameState currentState = SETUP;
     std::string overMessage = { 0 };
+    int frameRate = 500;
 
 public:
     View() = default;
@@ -414,7 +415,7 @@ public:
 
             case READY:
                 field->show();
-                Sleep(500);
+                Sleep(frameRate);
                 currentState = RUN;
                 break;
 
@@ -467,7 +468,7 @@ private:
 
         game->runGame(1);
         field->show();
-        Sleep(500);
+        Sleep(frameRate);
 
         int pressedKey = getPressedKey();
         if (pressedKey == 167 || pressedKey == 'p') currentState = PAUSE; // 167 - 'з'
@@ -481,7 +482,6 @@ private:
             "или любую другую клавишу, чтобы продолжить.\n";
         int key = 0;
         while ((key = getPressedKey()) == -1);
-        std::cout << key;
         if (key == 'r' || key == 170) currentState = SETUP; // 170 - 'к'
         else if (key == 's' || key == 235) { saveGameSettings(); currentState = RUN; } // 235 - 'џ'
         else currentState = RUN;
