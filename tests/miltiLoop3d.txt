@@ -1,0 +1,6 @@
+dimenshion=3
+n=10
+m=10
+k=1
+seed=5
+probability=0,010000

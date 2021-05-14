@@ -1,0 +1,6 @@
+dimenshion=2
+n=10
+m=10
+k=1
+seed=10
+probability=0,300000

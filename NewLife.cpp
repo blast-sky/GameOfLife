@@ -1,6 +1,8 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 #include <vector>
 #include <string>
@@ -8,7 +10,6 @@
 #include <numeric>
 #include <random>
 
-#include <Windows.h>
 #include <conio.h>
 #include <stdlib.h>
 
@@ -36,7 +37,9 @@ enum GameState
 enum GameEvent
 {
     FULL_FIELD,
-    EMPTY_FIELD
+    EMPTY_FIELD,
+    SINGLE_LOOP,
+    MULTI_LOOP
 };
 
 const std::string gameSettingsNames[] = {
@@ -90,6 +93,12 @@ struct Field1D
             out << field[i];
         return out;
     }
+    bool operator==(const Field1D& other)
+    {
+        for (size_t i = 0; i < cells.size(); ++i)
+            if (!(cells[i].type == other.cells[i].type)) return false;
+        return true;
+    }
 };
 struct Field2D : iField
 {
@@ -112,6 +121,12 @@ struct Field2D : iField
         for (int i = 0; i < field.n; i++)
             out << field[i] << "\n";
         return out;
+    }
+    bool operator==(const Field2D& other) // using if n,m is equals
+    {
+        for (size_t i = 0; i < cells.size(); ++i)
+            if (!(cells[i] == other.cells[i])) return false;
+        return true;
     }
     virtual void show() override
     {
@@ -143,6 +158,12 @@ struct Field3D : iField
         for (int i = 0; i < field.k; i++)
             out << i << ":\n" << field[i] << "\n";
         return out;
+    }
+    bool operator==(const Field3D& other) // using if n,m,k is equals
+    {
+        for (size_t i = 0; i < cells.size(); ++i)
+            if (!(cells[i] == other.cells[i])) return false;
+        return true;
     }
     virtual void show() override
     {
@@ -232,18 +253,21 @@ struct Game2D : iGame
 {
     Field2D field;
     Field2D fieldNext;
+    Field2D fieldLoop;
+    Field2D fieldLoopNext;
+    unsigned long long stepCount = 0;
     Game2D() { dimension = 2; }
     Game2D(int n, int m){
         this->n = n;
         this->m = m;
         dimension = 2;
-        field = fieldNext = Field2D(n, m);
+        field = fieldNext = fieldLoop = fieldLoopNext = Field2D(n, m);
     }
     virtual void setGame(double p, int s = 0) override
     {
         probability = p;
         seed = s;
-        field = fieldNext = Field2D(n, m);
+        field = fieldNext = fieldLoopNext = Field2D(n, m);
         vector<int> tmp(n * m);
         iota(tmp.begin(), tmp.end(), 0);
         shuffle(tmp.begin(), tmp.end(), std::mt19937(seed));
@@ -253,6 +277,7 @@ struct Game2D : iGame
             int y = tmp[i] % m;
             field[x][y].type = TypeCell::alive;
         }
+        fieldLoop = field;
     }
     void runGame(int numIt) override
     {
@@ -266,26 +291,46 @@ struct Game2D : iGame
                     fieldNext[i][j].type = field[i][j].type;
                     if (count <= loneliness || count >= overpopulation) fieldNext[i][j].type = TypeCell::env;
                     else if (count >= birth_start && count <= birth_end) fieldNext[i][j].type = TypeCell::alive;
+
+                    if (stepCount % 2 == 1)
+                    {
+                        int count = fieldLoop.getNum(i, j);
+                        fieldLoopNext[i][j].type = fieldLoop[i][j].type;
+                        if (count <= loneliness || count >= overpopulation) fieldLoopNext[i][j].type = TypeCell::env;
+                        else if (count >= birth_start && count <= birth_end) fieldLoopNext[i][j].type = TypeCell::alive;
+                    }
                 }
             }
-            field = fieldNext;
-        }
-        int aliveCount = 0;
-        for (int i = 0; i < n; i++)
-        {
-            for (int j = 0; j < m; j++)
+
+            int aliveCount = 0;
+            for (int i = 0; i < n; i++)
             {
-                aliveCount += (field[i][j].type == TypeCell::alive);
+                for (int j = 0; j < m; j++)
+                {
+                    aliveCount += (field[i][j].type == TypeCell::alive);
+                }
             }
+            if (aliveCount == 0) { sendEvent(EMPTY_FIELD); return; }
+            else if (aliveCount == n * m) { sendEvent(FULL_FIELD); return; }
+
+            if (field == fieldNext) { sendEvent(SINGLE_LOOP); return; }
+            field = fieldNext;
+
+            if (field == fieldLoop) { sendEvent(MULTI_LOOP); return; }
+            if (stepCount % 2 == 1)
+                fieldLoop = fieldLoopNext;
+
+            ++stepCount;
         }
-        if (aliveCount == 0) sendEvent(EMPTY_FIELD);
-        else if (aliveCount == n * m) sendEvent(FULL_FIELD);
     }
 };
 struct Game3D : public iGame
 {
     Field3D field;
     Field3D fieldNext;
+    Field3D fieldLoop;
+    Field3D fieldLoopNext;
+    unsigned long long stepCount = 0;
     Game3D() { dimension = 3; }
     Game3D(int n, int m, int k) {
         this->n = n;
@@ -293,12 +338,14 @@ struct Game3D : public iGame
         this->k = k;
         dimension = 3;
         field = fieldNext = Field3D(n, m, k);
+        fieldLoop = fieldLoopNext = field;
     }
     virtual void setGame(double p, int s = 0) override
     {
+        stepCount = 0;
         probability = p;
         seed = s;
-        field = fieldNext = Field3D(n, m, k);
+        field = fieldNext = fieldLoopNext = Field3D(n, m, k);
         vector<int> tmp(n * m * k);
         iota(tmp.begin(), tmp.end(), 0);
         shuffle(tmp.begin(), tmp.end(), std::mt19937(seed));
@@ -309,6 +356,7 @@ struct Game3D : public iGame
             int y = tmp[i] % (n * m) % m;
             field[z][x][y].type = TypeCell::alive;
         }
+        fieldLoop = field;
     }
     void runGame(int numIt) override
     {
@@ -324,15 +372,31 @@ struct Game3D : public iGame
                         fieldNext[l][i][j].type = field[l][i][j].type;
                         if (count <= loneliness || count >= overpopulation) fieldNext[l][i][j].type = TypeCell::env;
                         else if (count >= birth_start && count <= birth_end) fieldNext[l][i][j].type = TypeCell::alive;
+
+                        if (stepCount % 2 == 1)
+                        {
+                            count = fieldLoop.getNum(l, i, j, TypeCell::alive, radius);
+                            fieldLoopNext[l][i][j].type = fieldLoop[l][i][j].type;
+                            if (count <= loneliness || count >= overpopulation) fieldLoopNext[l][i][j].type = TypeCell::env;
+                            else if (count >= birth_start && count <= birth_end) fieldLoopNext[l][i][j].type = TypeCell::alive;
+                        }
                     }
                 }
             }
+            double frac = getAliveFraction();
+            double epsilon = 0.0001;
+            if (frac >= 0.0 - epsilon && frac <= 0.0 + epsilon) { sendEvent(EMPTY_FIELD); return; }
+            if (frac >= 1.0 - epsilon && frac <= 1.0 + epsilon) { sendEvent(FULL_FIELD);  return; }
+
+            if (field == fieldNext) { sendEvent(SINGLE_LOOP); return; }
             field = fieldNext;
+
+            if (field == fieldLoop) { sendEvent(MULTI_LOOP); return; }
+            if (stepCount % 2 == 1)
+                fieldLoop = fieldLoopNext;
+            
+            ++stepCount;
         }
-        double frac = getAliveFraction();
-        double epsilon = 0.0001;
-        if (frac >= 0.0 - epsilon && frac <= 0.0 + epsilon) { sendEvent(EMPTY_FIELD); return; }
-        if (frac >= 1.0 - epsilon && frac <= 1.0 + epsilon) { sendEvent(FULL_FIELD);  return; }
     }
     double getAliveFraction()
     {
@@ -396,10 +460,7 @@ private:
 
 public:
     View() = default;
-    ~View()
-    {
-        delete game;
-    }
+    ~View() { delete game; }
 
     void start()
     {
@@ -415,7 +476,7 @@ public:
 
             case READY:
                 field->show();
-                Sleep(frameRate);
+                std::this_thread::sleep_for(std::chrono::milliseconds(frameRate));
                 currentState = RUN;
                 break;
 
@@ -468,7 +529,7 @@ private:
 
         game->runGame(1);
         field->show();
-        Sleep(frameRate);
+        std::this_thread::sleep_for(std::chrono::milliseconds(frameRate));
 
         int pressedKey = getPressedKey();
         if (pressedKey == 167 || pressedKey == 'p') currentState = PAUSE; // 167 - 'ç'
@@ -609,6 +670,14 @@ private:
             break;
         case EMPTY_FIELD:
             overMessage = "EMPTY_FIELD";
+            currentState = OVER;
+            break;
+        case SINGLE_LOOP:
+            overMessage = "SINGLE_LOOP";
+            currentState = OVER;
+            break;
+        case MULTI_LOOP:
+            overMessage = "MULTI_LOOP";
             currentState = OVER;
             break;
         default:
